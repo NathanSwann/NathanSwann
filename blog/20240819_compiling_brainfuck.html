@@ -1,0 +1,282 @@
+
+<head>
+<!---- FONTS ---->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@700&family=Permanent+Marker&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+<link href="/static/blog.css" rel="stylesheet">
+
+<meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+</head>
+
+<body>
+<h1 style="text-align:center;width:100%;font-size:2em;margin-top:1em">Compiling Brainfuck</h1>
+<div id="content" style="width:70%;margin:auto;text-align:justify">
+<p>Brainfuck is one of the simplest languages out there, specifically designed for ease of interpretation and compiler creation. However, while it’s easy to create a basic compiler, making a <em>good</em> one is a different challenge altogether. In this post, we’ll explore the process of building a simple yet effective optimizing compiler for Brainfuck, starting with the basics and gradually introducing more advanced optimizations. The compiler itself will actually output NASM before assembling into a traditional executable. While a basic understanding of assembly is helpful, it’s not a strict requirement to follow along. If you want to look at the source code as we go, it is available <a href="https://github.com/NathanSwann/Brainfuck/tree/main">here</a>.</p>
+<h1 id="understanding-the-basics-of-brainfuck">Understanding the Basics of Brainfuck</h1>
+<p>At its core, Brainfuck operates on a simple model: an endless ‘tape’ of memory cells. Imagine this tape as a row of tiny boxes, each capable of holding a single byte of data. Every instruction in Brainfuck interacts with one of these boxes, either by changing the data inside the box or by moving between these boxes. The full list of these instructions is as follows:</p>
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: center;">Character</th>
+<th style="text-align: left;">Operation</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: center;"><code>[</code></td>
+<td style="text-align: left;">If the current tape value is zero jump to the corresponding <code>]</code></td>
+</tr>
+<tr class="even">
+<td style="text-align: center;"><code>]</code></td>
+<td style="text-align: left;">If the current tape value is non-zero jump to the corresponding <code>[</code></td>
+</tr>
+<tr class="odd">
+<td style="text-align: center;"><code>&gt;</code></td>
+<td style="text-align: left;">Move the current tape over one to the right</td>
+</tr>
+<tr class="even">
+<td style="text-align: center;"><code>&lt;</code></td>
+<td style="text-align: left;">Move the current tape over one to the left</td>
+</tr>
+<tr class="odd">
+<td style="text-align: center;"><code>+</code></td>
+<td style="text-align: left;">Increment the current tape value by 1 overflowing at 255</td>
+</tr>
+<tr class="even">
+<td style="text-align: center;"><code>-</code></td>
+<td style="text-align: left;">Decrement the current tape value by 1 underflowing at 0</td>
+</tr>
+<tr class="odd">
+<td style="text-align: center;"><code>.</code></td>
+<td style="text-align: left;">Store one byte from standard in to the current tape value</td>
+</tr>
+<tr class="even">
+<td style="text-align: center;"><code>,</code></td>
+<td style="text-align: left;">Output the current tape value to standard out</td>
+</tr>
+</tbody>
+</table>
+<p>For example, the code <code>++&gt;[+++&lt;-&gt;]</code> first increments the first cell twice. Then, it enters a loop where the second cell is incremented by 3 during each iteration, while the first cell is decremented by 1. This loop continues until the first cell is zero, leaving the second cell with a value of 6.</p>
+<p>Most Brainfuck instructions are trivial to translate over to assembly, for instance assuming we keep our current positions on the tape inside <code>r9</code> (the 9th register in 64-bit CPUs, often used for temporary storage during computations and in our case will always contain the index of the current cell) and we have a reference to the tape named <code>tape</code> we can translate <code>+</code> into the following in nasm:</p>
+<pre class="asm"><code>add byte [tape+r9*1], 1 ;; add one to the current cell</code></pre>
+<p>For more complex operations such as <code>[</code> we need to first label all of our <code>[</code> (jumps) and <code>]</code> (returns) with findable labels for the NASM assembler to be able to tell what we are talking about whenever we ask to jump somewhere else in the code. These labels will actually be substituted for proper addresses in memory during the assembly process, so their names don’t matter. Labels can be added rather easily using a stack among other methods (<a href="https://github.com/NathanSwann/Brainfuck/blob/main/m.c#L15">see the source code for details</a>) but the end result will look something like this:</p>
+<pre class="asm"><code>.jmp_label:
+mov r8b, byte [tape+r9*1] ;; load current value
+test r8b,r8b              ;; is it zero?
+jz .ret_label             ;; if zero jump to the return label</code></pre>
+<p>So to reiterate, our compiler will take in a sequence of Brainfuck instructions and will emit their NASM equivalents before passing the full output to NASM which will assemble our instructions into machine code. Ultimately this looks like a lot of print and case statements.</p>
+<p>A simple optimization we will be doing straight away is to collapse multiple operations like <code>+++</code> into one single add instruction that adds 3 instead of 1. In almost every program this will dramatically decrease the number of instructions. But before we get to into the weeds, let’s set a baseline first.</p>
+<h1 id="setting-up-a-performance-benchmark">Setting Up a Performance Benchmark</h1>
+<p>To effectively measure the impact of our optimizations, we’ll use a benchmark program that calculates the length of the <a href="https://en.wikipedia.org/wiki/Collatz_conjecture">Collatz sequence</a> for all numbers under one million. This benchmark is ideal because it is simple to understand and involves a mix of arithmetic operations and loops. The python code for this would look something like:</p>
+<pre class="python"><code>
+def collatz(num):
+    x = 0
+    while num != 1:
+        if num % 2 == 0:
+            num = num // 2
+        else:
+            num = 3 * num + 1
+        x += 1
+    print(x)
+
+
+while True:
+    try:
+        x = input()
+        collatz(int(x))
+    except:
+        break
+    </code></pre>
+<p>The Brainfuck program to do the exact same thing is below, although it is much harder to read. I won’t go into to detail into how exactly it works, but I think it’s important to point out the amount of repetitive snippets there are, for example <code>[-]</code> or <code>[&gt;+&lt;-]</code> we will get to what exactly these snippets are doing in a bit, but it keep it in mind. This is one of the main problems with writing fast Brainfuck, it takes a lot to do a little. This code was actually taken from <a href="https://Brainfuck.org/collatz.b">here</a>.</p>
+<pre class="c"><code>&gt;,[
+    [
+        ----------[
+            &gt;&gt;&gt;[&gt;&gt;&gt;&gt;]+[[-]+&lt;[-&gt;&gt;&gt;&gt;++&gt;&gt;&gt;&gt;+[&gt;&gt;&gt;&gt;]++[-&gt;+&lt;&lt;&lt;&lt;&lt;]]&lt;&lt;&lt;]
+            ++++++[&gt;------&lt;-]&gt;--[&gt;&gt;[-&gt;&gt;&gt;&gt;]+&gt;+[&lt;&lt;&lt;&lt;]&gt;-],&lt;
+        ]&gt;
+    ]&gt;&gt;&gt;++&gt;+&gt;&gt;[
+        &lt;&lt;[&gt;&gt;&gt;&gt;[-]+++++++++&lt;[&gt;-&lt;-]+++++++++&gt;[-[&lt;-&gt;-]+[&lt;&lt;&lt;&lt;]]&lt;[&gt;+&lt;-]&gt;]
+        &gt;[&gt;[&gt;&gt;&gt;&gt;]+[[-]&lt;[+[-&gt;&gt;&gt;&gt;]&gt;+&lt;]&gt;[&lt;+&gt;[&lt;&lt;&lt;&lt;]]+&lt;&lt;&lt;&lt;]&gt;&gt;&gt;[-&gt;&gt;&gt;&gt;]+&gt;+[&lt;&lt;&lt;&lt;]]
+        &gt;[[&gt;+&gt;&gt;[&lt;&lt;&lt;&lt;+&gt;&gt;&gt;&gt;-]&gt;]&lt;&lt;&lt;&lt;[-]&gt;[-&lt;&lt;&lt;&lt;]]&gt;&gt;&gt;&gt;&gt;&gt;&gt;
+    ]&gt;&gt;+[[-]++++++&gt;&gt;&gt;&gt;]&lt;&lt;&lt;&lt;[[&lt;++++++++&gt;-]&lt;.[-]&lt;[-]&lt;[-]&lt;]&lt;,
+]</code></pre>
+<p>So to get us started lets look at how long it took this Brainfuck program to complete after no optimizations:</p>
+<pre class="bash"><code>$ time python examples/collatz.py &lt;examples/numbers &gt;/dev/null
+
+real    0m8.414s
+user    0m8.222s
+sys     0m0.187s
+
+$ time ./a.out &lt;examples/numbers &gt;/dev/null
+
+real    0m16.370s
+user    0m14.413s
+sys     0m1.939s</code></pre>
+<p>Ok so without optimizations our compiler produces executables that are about twice as slow as python. I think this should be expected since we are doing nothing but emitting the assembly equivalent of the Brainfuck code which itself has to do a lot of instructions to even multiply or divide. In contrast, python can do these operations in one go.</p>
+<h1 id="reducing-system-call-overhead">Reducing System Call Overhead</h1>
+<p>The first big issue that springs to mind is that we are making a syscall to write and read each character, for those unaware a syscall is merely a function call to the kernel (in this case Linux) that is used to deal with things that are OS specific such as reading and writing to stdout as well as memory management etc. System calls introduce overhead because they involve context switching between user mode and kernel mode, which is relatively expensive (in comparison to say <code>add</code>). Context switching not only introduces latency but can also disrupt the flow of instructions in the CPU pipeline, leading to cache misses and reduced overall efficiency. In performance-critical applications, like our Brainfuck executables, minimizing the frequency of these calls can lead to performance improvements.</p>
+<p>To get a rough idea of how many more we are making than the python version lets look at the <code>strace</code> of each:</p>
+<pre class="bash"><code>$ strace -o python_trace python examples/collatz.py &lt;examples/numbers &gt;/dev/null
+$ strace -o bf_trace ./a.out &lt;examples/numbers &gt;/dev/null
+$ wc -l python_trace bf_trace 
+  2001678 python_trace
+ 10544848 bf_trace
+ 12546526 total</code></pre>
+<p>We are making more than 5x the number of calls! The Python implementation, while higher-level, makes use of buffers to minimize system calls, whereas our initial Brainfuck implementation performs a syscall for every single character read or written. So let’s take that idea from python and add it to our compiler. To do this we will need two different functions, one for reading and another for writing. Instead of immediately making a syscall we will instead add to a buffer and once that buffer gets full then we will make the syscall before clearing the buffer again.</p>
+<p>Lets look at <code>output</code> which is the simpler of the two (for the <code>input</code> implementation see the <a href="https://github.com/NathanSwann/Brainfuck/tree/main/asm">repo</a>):</p>
+<pre class="asm"><code>output:
+    mov r10, output_buffer                    ;; start of the message
+    add r10b, byte [output_buffer_pointer]    ;; move to nearest free byte
+    mov r11b, byte [tape+r9*1]                ;; get the current byte on the tape
+    mov byte [r10], r11b                      ;; copy current tape head into buffer
+    inc byte [output_buffer_pointer]          ;; move the head by 1
+    cmp byte [output_buffer_pointer], 255     ;; is buffer full?
+    jb .__ok                                  ;; if not jump to done
+    call flush_output                         ;; flush the ouput buffer
+.__ok:                                        ;; buffer is not full:
+    ret                                       ;; done
+flush_output:
+    mov rsi, output_buffer                    ;; output the contents of the output_buffer
+    mov rdx, 0                                ;; clear upper parts of rdx
+    mov dl, byte [output_buffer_pointer]      ;; we want to write pointer number of chars
+    mov rax, 1                                ;; to standard ouput
+    mov rdi, 1                                ;; write syscall number
+    syscall                                   ;; call the syscall
+    mov byte [output_buffer_pointer], 0       ;; reset the pointer
+    ret                                       ;; done</code></pre>
+<p>By using these new functions we are able to shave off 3 seconds of our runtime and remove a lot of those pesky syscalls and hence removing all of those context switches which again leads to less disruption to our CPU cache.</p>
+<pre class="bash"><code>$ strace -o bf_trace ./a.out &lt;examples/numbers &gt;/dev/null
+$ wc -l bf_trace 
+54039 bf_trace
+$ time ./a.out &lt;examples/numbers &gt;/dev/null
+real    0m13.684s
+user    0m13.645s
+sys     0m0.033s</code></pre>
+<p>These initial optimizations are promising, shaving 3 seconds off our runtime with just a simple change. And this is just the beginning—we haven’t even touched the main assembly code yet. Let’s see how much more performance we can squeeze out!</p>
+<h1 id="optimizing-common-brainfuck-patterns">Optimizing Common Brainfuck Patterns</h1>
+<p>Now we can focus on the Brainfuck optimization part. As mentioned previously, Brainfuck, due to its minimalistic nature, often requires multiple instructions to perform simple operations. By identifying and optimizing common Brainfuck patterns, we can significantly enhance performance.</p>
+<h2 id="efficient-single-cell-manipulation-techniques">Efficient Single Cell Manipulation Techniques</h2>
+<p>Perhaps the most common idiom in Brainfuck is <code>[-]</code>, which clears the current cell or sets it to zero. This pattern, though simple, appears frequently in Brainfuck code. Instead of looping to decrement the cell to zero (which can take <code>O(n)</code> time), we can directly set it to zero using a single <code>mov</code> instruction. One other thing we can do is collapse the next <code>+</code> or <code>-</code> instructions into the set e.g. turn <code>[-]++</code> into a single <code>mov byte[tape+r9*1],2</code>. This pattern appears 8 times in our code and implementing this change leads to a 2 second speed up!</p>
+<pre class="bash"><code>$ time ./a.out &lt;examples/numbers &gt;/dev/null
+
+real    0m11.332s
+user    0m11.306s
+sys     0m0.018s</code></pre>
+<p>We can do better though, so what else do we have?</p>
+<h2 id="optimizing-arithmetic-loops-in-brainfuck">Optimizing Arithmetic Loops in Brainfuck</h2>
+<p>Let’s have a look at one of our segments of the collatz code: <code>[&lt;++++++++&gt;-]</code> what exactly is happening here? Well we shift over a cell add 8 and then go back to the starting cell and decrement it by 1, if its 0 then we stop. Or in other words we are adding 8 times the starting cell to the cell on its left and then clearing the starting cell In asm we could write it like this:</p>
+<pre class="asm"><code>mov al, byte [tape+r9*1]
+mov rdx, 8
+mul rdx
+add byte[tape + r9*1 - 1], al
+mov byte[tape + r9*1],0</code></pre>
+<p>Since almost every program needs to add numbers at some point optimizing these additions is another easy win. But we can go more general for example with code like like <code>[-&gt;+&gt;++&gt;+++&lt;&lt;&lt;]</code> we can again separate this into 3 multiplications followed by a set to zero at the end. To detect these sorts of loops we can look for loops that satisfy the following:</p>
+<ol type="1">
+<li>The loop contains no other loops</li>
+<li>The loop starts and ends each iteration on the same cell and that same cell is only decremented once per iteration</li>
+<li>There are only shifts and increments/decrements in the loop i.e. no I/O.</li>
+</ol>
+<p>Whenever we get one of these loops we can look at the amount each non-starting cell is incremented or decremented in the loop and that can become a multiplication of the starting cell followed by an addition to the other cell. In our benchmark this pattern shows up a total of 6 times. So lets see what the difference looks like with this optimization:</p>
+<pre class="bash"><code>$ time ./a.out &lt; examples/numbers &gt;/dev/null
+
+real    0m5.887s
+user    0m5.878s
+sys     0m0.008s</code></pre>
+<p>Yes you are seeing that right we cut our time near in half! But why is it so much better? Lets take a simple case <code>[-&gt;+&lt;]</code> without this optimization this takes over 5 * the starting cell instructions to complete but with our optimization it only takes 5.</p>
+<p>As an exercise, think about how you could further optimize specific cases, such as <code>[-&gt;+&lt;]</code> or more complex patterns like <code>[-&gt;+&gt;++&gt;++++++&gt;------&lt;&lt;&lt;&lt;]</code>. Consider how breaking down these patterns into their core arithmetic components might allow for even greater efficiency.</p>
+<h1 id="minimizing-pointer-adjustments">Minimizing Pointer Adjustments</h1>
+<p>So given we have beaten python does that mean we are done? I would say no so let’s keep going. The next thing that has a target on its back is <code>&gt;</code> / <code>&lt;</code> suppose we had the code <code>+&gt;+&gt;+&gt;+&gt;+&gt;</code> currently this would become:</p>
+<pre class="asm"><code>add byte [tape+r9*1], 1
+add r9, 1
+add byte [tape+r9*1], 1
+add r9, 1
+add byte [tape+r9*1], 1
+add r9, 1
+add byte [tape+r9*1], 1
+add r9, 1
+add byte [tape+r9*1], 1
+add r9, 1</code></pre>
+<p>This seems ok except we have to keep modifying <code>r9</code> between each addition wouldn’t it be nice if instead we could just add an offset to our <code>add</code> instruction and deal with <code>r9</code> later when it’s actually important, say for <code>.</code>? Thankfully we can and it looks like this:</p>
+<pre class="asm"><code>add byte [tape+r9*1], 1
+add byte [tape+r9*1+1], 1
+add byte [tape+r9*1+2], 1
+add byte [tape+r9*1+3], 1
+add byte [tape+r9*1+4], 1
+add r9, 5</code></pre>
+<p>You may think that this would be equivalent however importantly the math is actually baked into the machine code saving our poor CPU from having to keep track of it all at runtime. For now lets say that we will only update <code>r9</code> (the tape pointer) before we perform an operation which is not in <code>&gt;&lt;+-</code> or <code>[-]</code>.</p>
+<p>As a very quick aside up to this point we have been using this definition for our Intermediate representation:</p>
+<pre class="c"><code>typedef enum BF_OP_KIND
+{
+    NOP,
+    LFT,
+    RHT,
+    INC,
+    DEC,
+    INP,
+    OUT,
+    JMP,
+    RET,
+    SET_VALUE,
+    MUL_ADD_COPY,
+} BF_OP_KIND;
+
+typedef struct
+{
+    BF_OP_KIND k;
+    __uint64_t op;
+} BF_OP;</code></pre>
+<p>So we have to figure out where our offset can go, the quick answer is we keep it in <code>op</code> by splitting the 64bit integer into two 32bit integers one for the offset and one for the value, in theory the value we add doesn’t need to go past 255, and so I think its fairly safe to do this. Feel free to shout at me, but this is my blog post I get to write the unsafe C. In the end this saves us about 1 second when we apply it to all <code>+</code>, <code>-</code> and <code>[-]</code></p>
+<pre class="bash"><code>$ time ./a.out &lt; examples/numbers &gt; /dev/null
+
+real    0m4.755s
+user    0m4.720s
+sys     0m0.032s</code></pre>
+<h1 id="conclusion">Conclusion</h1>
+<p>With these optimizations, we’ve pushed the boundaries of what’s possible with a Brainfuck compiler, achieving speeds that were initially out of reach. But the world of low-level optimization is vast and there will always be more techniques to explore and refine but to summarize how far we came lets look at the overall speed up we got at each step:</p>
+<table>
+<thead>
+<tr class="header">
+<th style="text-align: center;">Step</th>
+<th style="text-align: center;">Time(s)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: center;">Naive Compiler</td>
+<td style="text-align: center;">16.370</td>
+</tr>
+<tr class="even">
+<td style="text-align: center;">Buffer Syscalls/IO</td>
+<td style="text-align: center;">13.684</td>
+</tr>
+<tr class="odd">
+<td style="text-align: center;">Implement <code>[-]</code> Idiom</td>
+<td style="text-align: center;">11.332</td>
+</tr>
+<tr class="even">
+<td style="text-align: center;">Python Implementation</td>
+<td style="text-align: center;">8.414</td>
+</tr>
+<tr class="odd">
+<td style="text-align: center;">Identify Multiplication and Additions</td>
+<td style="text-align: center;">5.887</td>
+</tr>
+<tr class="even">
+<td style="text-align: center;">Hard-code Displacements</td>
+<td style="text-align: center;">4.755</td>
+</tr>
+</tbody>
+</table>
+<p>Let’s face it no one is going to use Brainfuck for any actual software, so why did I bother doing this to myself? For one, a lot of these techniques although not directly applicable to say compiling C they do expose the general thought process of compiling more complex languages. It helped me learn NASM which is definitely a skill I wanted to learn. I am also hoping that some of this knowledge is transferable to when I want try compiling my own Lisp. Ultimately however I just find it fun and even better I got to make a faster compiler than most. For example Tsoding’s Brainfuck JIT compiler (maybe I should learn how to JIT compile) whose source code you can find <a href="https://github.com/tsoding/bfjit">here</a>:</p>
+<pre class="bash"><code>$ time ./bfjit ../examples/collatz.bf  &lt; ../examples/numbers &gt; /dev/null
+[INFO] JIT: on
+
+real    0m14.576s
+user    0m12.605s
+sys     0m1.973s</code></pre>
+<p>If you think I missed anything obvious or made a mistake feel free to let me know, again the source code is all available <a href="https://github.com/NathanSwann/Brainfuck/tree/main">here</a></p>
+<!----CONTENT_BEGIN---->
+</div>
+<div style="margin-top: 3em;"></div>
+<body>
