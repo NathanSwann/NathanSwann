@@ -1,0 +1,86 @@
+
+<head>
+<!---- FONTS ---->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@700&family=Permanent+Marker&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+<link href="/static/blog.css" rel="stylesheet">
+
+<meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+</head>
+
+<body>
+<h1 style="text-align:center;width:100%;font-size:2em;margin-top:1em">AOC Day 1</h1>
+<div id="content" style="width:70%;margin:auto;text-align:justify">
+<p>With December beginning, we are once again graced with the Advent of Code: a daily coding challenge crafted by whimsical elves. And what better way to tackle these devious puzzles than with KDB/Q? Today’s problem revolves around comparing and transforming lists. I would encourage you to check out <a href="https://adventofcode.com/2024/day/1">todays full text</a> and give it a go yourself. Spoilers Ahead.</p>
+<h1 id="part-1">Part 1</h1>
+<p>In Part 1, we are tasked with sorting two lists and calculating the sum of their element-wise differences. This is straightforward, there are multiple ways to solve it in KDB. Let’s walk through them.</p>
+<p>First, we need to parse the input. A slight wrinkle is that the numbers are separated by three spaces, which means <code>0:</code> won’t work out of the box. Instead, we can use <code>vs</code> to split each line into parts and cast them to longs. While we’re at it, we’ll use <code>flip</code> to transform our input into two separate lists:</p>
+<pre class="q"><code>q)inp:flip&quot;J&quot;$&quot;   &quot;vs/:read0`:data/1
+q)inp
+3 4 2 1 3 3
+4 3 5 3 9 3</code></pre>
+<p>Now we need to pair up our elements from smallest to largest, for this we can use <code>asc</code>. Next we need to calculate the difference. There are a few ways to do this e.g. <code>-/</code> or taking the last of <code>deltas</code> but I want to highlight a favourite. We can use apply <code>.</code> along with <code>(-)</code>. You may wonder why we cant just do <code>-.</code> and the primary reason is that on the left we need <code>-</code> to act as a noun rather than a verb, by wrapping it in brackets KDB will now treat it as a noun.</p>
+<pre class="q"><code>q)sum abs(-). asc each inp
+11</code></pre>
+<h2 id="minor-diversion-to-qsql">Minor Diversion to QSQL</h2>
+<p>Alternatively, we can solve this problem using QSQL and tables. To do this, we need to structure our <code>inp</code> data as a table rather than a flipped list. Here’s how we can transform the input into a table format:</p>
+<pre class="q"><code>q)inptab:([]lista:`long$();listb:`long$())upsert&quot;J&quot;$&quot;   &quot;vs/:read0`:data/1
+q)inptab
+lista listb
+-----------
+3     4
+4     3
+2     5</code></pre>
+<p>With the data in a table, we can use a single select statement to calculate the sum of absolute differences between the sorted lists:</p>
+<pre class="q"><code>q)select sum abs asc[lista]-asc listb from inptab
+lista
+-----
+11</code></pre>
+<p>Both the table-based approach and the list-based approach are comparable in terms of performance, so it largely comes down to preference. For day-to-day tasks, I find the table-based version to be slightly more readable and intuitive, especially when working with more data.</p>
+<p>Here’s a quick comparison of their performance:</p>
+<pre class="q"><code>q)\t:1000 sum abs(-). asc each inp
+25
+q)\t:1000 select sum abs asc[lista]-asc listb from inptab
+26</code></pre>
+<h1 id="part-2">Part 2</h1>
+<p>In Part 2, the task changes slightly: we need to calculate the sum of the elements in list a multiplied by their frequencies in list b. Let’s start by using the table-based approach to solve this.</p>
+<p>To determine the frequencies of elements in list b, we can use a <code>count by</code> query:</p>
+<pre class="q"><code>q)select c:count i by listb from inptab
+listb| c
+-----| -
+3    | 3
+4    | 1</code></pre>
+<p>Now that we have the frequencies, we can perform a left join (<code>lj</code>) to combine them with the main table and compute the desired sum. One detail to note: we need to rename the key in the frequency table (listb) to match the lista column in the main table before joining. Here’s the full query:</p>
+<pre class="q"><code>q)select sum lista*c from inptab lj select c:count i by lista:listb from inptab
+lista
+-----
+31</code></pre>
+<h2 id="on-using-i">On Using <code>i</code></h2>
+<p>You may have heard that using the implicit index column <code>i</code> in a query is slower than selecting a column explicitly defined in the table. While this is technically true, the impact on performance in most cases (including ours) is negligible. For example:</p>
+<pre class="q"><code>q)\t:100000 select c:count i by listb from inptab
+2512
+q)\t:100000 select c:count lista by listb from inptab
+2520</code></pre>
+<h2 id="back-to-terse-land">Back To Terse Land</h2>
+<p>Let’s return to our original non-table solution and explore what’s happening to each of the lists. The transformation process can be visualized like this:</p>
+<p><img src="/static/images/AOCD1P2Vis.png" style="width:90%;margin:auto;display:block;mix-blend-mode: multiply;"></p>
+<p>In this approach, we transform list b into a mapping of frequencies while leaving list a unchanged. Conceptually, this involves applying the <strong>identity function</strong> to list a and <code>count each group</code> to list b. Using the <code>@</code> operator, we can pair each list with its respective transformation function:</p>
+<pre><code>q)(::;count each group::)@&#39;inp
+3 4 2 1 3 3
+4 3 5 9!1 3 1 1</code></pre>
+<p>For those not too familiar <code>::</code> here acts as an identity function, in the first case it is just returning list a while in the second part the <code>::</code> forces the chain of functions to act like a projection instead of KDB trying to execute it straight away. Another alternative would have been to do <code>'[count each;group]</code> however I find that syntax harder to parse. From here its fairly easy to do the rest:</p>
+<pre class="q"><code>q)sum{x*y x}.(::;count each group::)@&#39;inp
+31</code></pre>
+<p>We can also use <code>count each group</code> in a single select statement rather than the left join in the previous solution and in fact it brings the performance more in line with list solution:</p>
+<pre><code>q)\t:100000 select sum lista*c from inptab lj select c:count i by lista:listb from inptab
+11525
+q)\t:100000 sum{x*y x}.(::;count each group::)@&#39;inp
+4352
+q)\t:100000 select sum lista*(count each group listb) lista from inptab
+4512</code></pre>
+<p>With that, I’ve covered everything I tried or found interesting in today’s Advent of Code challenge. If you discovered a different approach or a unique insight, I’d love to hear about it!</p>
+<!----CONTENT_BEGIN---->
+</div>
+<div style="margin-top: 3em;"></div>
+<body>
