@@ -1,0 +1,66 @@
+
+<head>
+<!---- FONTS ---->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@700&family=Permanent+Marker&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+<link href="/NathanSwann/static/blog.css" rel="stylesheet">
+
+<meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+</head>
+
+<body>
+<h1 style="text-align:center;width:100%;font-size:2em;margin-top:1em">AOC Day 2</h1>
+<div id="content" style="width:70%;margin:auto;text-align:justify">
+<p>It seems our adventurous elfs need a hand analysing some unsual data from a fussion/fission reactor. What better way to help them than with some more KDB. Again I recommend <a href="https://adventofcode.com/2024/day/2">trying the puzzle yourself</a>, spoilers ahead.</p>
+<h1 id="part-1">Part 1</h1>
+<p>For our first task we are to take a series of list of numbers and count the number of those lists that are “safe”. A safe list is defined as one that is both:</p>
+<ul>
+<li><a href="https://en.wiktionary.org/wiki/strictly_increasing#English">Strictly increasing</a> or decreasing</li>
+<li>Never increases or decreases by more than 3</li>
+</ul>
+<p>Before we think about how to test the above lets get our data into a usable format like always:</p>
+<pre><code>q)inp:&quot;J&quot;$&quot; &quot;vs/:read0`:data/2ex
+q)inp
+7 6 4 2 1
+1 2 7 8 9</code></pre>
+<p>Now since both conditions depend on the difference between one value and the next we will be needing to take <code>deltas</code> of each of our lists. One thing to watch out for though is that KDB will try and be clever and use <code>0</code> as the first element. To prevent this we have 2 options. The first is to set the first element ourselves i.e. <code>first[x]deltas 1_x</code> however another is just to drop the first delta <code>1_deltas x</code>.</p>
+<p>To check if our list is increasing or decreasing we can use <code>signum</code> to get the sign of the difference and then to verify that the sign is consistent we can use match each prior (<code>~':</code>) again remembering to drop the first element:</p>
+<pre><code>q)1_deltas 7 6 4 2 1
+-1 -2 -2 -1
+q)signum 1_deltas 7 6 4 2 1
+-1 -1 -1 -1i
+q)1_(~&#39;:)signum 1_deltas 7 6 4 2 1
+111b
+q)min 1_(~&#39;:)signum 1_deltas 7 6 4 2 1
+1b</code></pre>
+<p>Now to check the second condition we can again look at the deltas and verify that in absolute terms they do not exceed 3 and are never 0 using <code>within</code>:</p>
+<pre><code>q)abs 1_deltas 7 6 4 2 1
+1 2 2 1
+q)within[;(1;3)]each abs 1_deltas 7 6 4 2 1
+1111b
+q)min within[;(1;3)]each abs 1_deltas 7 6 4 2 1
+1b</code></pre>
+<p>How we wrap this up depends on what you want, perhaps the most readable would be to set each one to a variable inside a function and return the minimum of them. I however want to do something different, once again using our good old friend <code>::</code> as well as <code>@\:</code> to apply our input to both of our function chains above before reducing them using min:</p>
+<pre><code>q)min(min within[;(1;3)]each abs::;min 1_(~&#39;:)signum::)@\:1_deltas 7 6 4 2 1
+1b
+q)sum(min(min within[;(1;3)]each abs::;min 1_(~&#39;:)signum::)@\:1_deltas::)each inp
+2i</code></pre>
+<h1 id="part-2">Part 2</h1>
+<p>This is where it gets a bit harder. It turns out the system allows for one “fault” this means that for a given list if we can remove one element to make it safe we should consider it safe. Lets start by putting safety checker from part 1 into a variable:</p>
+<pre><code>q)p1:min(min within[;(1;3)]each abs::;min 1_(~&#39;:)signum::)@\:1_deltas::</code></pre>
+<p>The simplest way to allow for the removal of one element is to brute-force all possible removal options. For a given list <code>x</code>, we can create masks indicating which elements to retain. By default, each mask will have all elements set to 1 (included), except for a specific index set to 0 (excluded). Using these masks, we can generate modified versions of <code>x</code> by applying <code>where</code> to select the desired elements. To create all such masks, we can iterate over each index with apply at (<code>@</code>). Ensuring we also include the original list as a base case:</p>
+<pre><code>q)perm:{enlist[x],x where each@[count[x]#x;;:;0]each til count x}
+q)perm 7 6 4 2 1
+7 6 4 2 1
+6 4 2 1
+7 4 2 1
+7 6 2 1</code></pre>
+<p>From here it is pretty simple to join both of our functions together:</p>
+<pre><code>q)sum (max p1 each perm::)each inp
+4i</code></pre>
+<p>I personally spent way to long trying to not brute-force the permutations but couldn't get something that both solved the problem and was actualy readable so if you figured out a way to do both or have another interesting solution let me know!</p>
+<!----CONTENT_BEGIN---->
+</div>
+<div style="margin-top: 3em;"></div>
+<body>
