@@ -80,6 +80,15 @@ q)\t:100000 sum{x*y x}.(::;count each group::)@&#39;inp
 q)\t:100000 select sum lista*(count each group listb) lista from inptab
 4512</code></pre>
 <p>With that, I’ve covered everything I tried or found interesting in today’s Advent of Code challenge. If you discovered a different approach or a unique insight, I’d love to hear about it!</p>
+<h1 id="addendum">Addendum</h1>
+<h2 id="specialcase">Special Case For The Input (Credit: Krishan Subherwal)</h2>
+<p>If you are keen eyed you may have noticed that for the input list a is completely unique. This means we dont need to compute the frequencies for part 2 at all but can instead sum the elements of list b that appear in list a like so:</p>
+<pre><code>q)sum inp[1] inter inp 0</code></pre>
+<h2 id="specialcase">Fixed Width Parsing (Credit: Cong Run Tay)</h2>
+<p>Rather than using <code>vs</code> for parsing you can instead use <code>0:</code> with fixed widths:</p>
+<pre><code>q)("JJ";4 1)0:read0`:data/1ex
+3 4 2 1 3 3
+4 3 5 3 9 3</code></pre>
 <!----CONTENT_BEGIN---->
 </div>
 <div style="margin-top: 3em;"></div>
