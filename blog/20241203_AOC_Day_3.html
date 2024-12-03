@@ -1,0 +1,105 @@
+
+<head>
+<!---- FONTS ---->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@700&family=Permanent+Marker&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+<link href="/NathanSwann/static/blog.css" rel="stylesheet">
+
+<meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+</head>
+
+<body>
+<h1 style="text-align:center;width:100%;font-size:2em;margin-top:1em">AOC Day 3</h1>
+<div id="content" style="width:70%;margin:auto;text-align:justify">
+<p>This time, we’re assisting the elves in debugging their software issues. Naturally, we’ll be leveraging KDB once again this time with a little help from a crustacean companion. Be sure to <a href="https://adventofcode.com/2024/day/3">read the puzzle</a> yourself before proceeding. Spoilers ahead!</p>
+<h1 id="part-1-identifying-multiply-instructions">Part 1: Identifying Multiply Instructions</h1>
+<p>In Part 1, our task is to locate all multiply instructions in the input, compute the product of their inputs, and sum the results. Multiply instructions take the form <code>mul(x,y)</code>, where both <code>x</code> and <code>y</code> are integers. Any characters before or after the instruction can be ignored. For instance, <code>xmul(123,456)s</code> is a valid match.</p>
+<h2 id="regex-in-kdb-with-rust">Regex in KDB (with Rust)</h2>
+<p>Wouldn’t this problem be much easier if we had regex? Unfortunately, KDB doesn’t natively support regex. However, KDB allows us to load and execute C shared object (<code>.so</code>) files using the <code>2:</code> operator. For example:</p>
+<pre><code>q)func:`:sofilepath 2:(`functionname;nargs)</code></pre>
+<p>With this, we can create a wrapper <code>.so</code> file that bridges KDB with a regex library. Traditionally, such wrappers are written in C/++ using <a href="https://github.com/KxSystems/kdb/blob/master/c/c/k.h">k.h</a>. However, thanks to the Application Binary Interface (<a href="https://en.wikipedia.org/wiki/Application_binary_interface">ABI</a>), we can write the source code in any systems programming language (within reason). Rust, being quite popular recently, is a perfect choice here.</p>
+<p>This isn’t a Rust tutorial (and honestly, my Rust skills are a work in progress), but for this task, you only need to know about two Rust crates (packages):</p>
+<ul>
+<li><a href="https://crates.io/crates/kdbplus">kdbplus</a> allows us to write code that can be ran by kdb (behind the scenes its using a variant of <code>k.h</code>)</li>
+<li><a href="https://crates.io/crates/regex/">regex</a> allows us to run regex searchs on strings.</li>
+</ul>
+<p>We’ll create a function in Rust that takes a regex pattern and a string, returning all substrings that match the pattern. To interact with KDB, we use “K objects,” which combine a data type (e.g., char, int, or list) with its corresponding data. While this involves some unwrapping, any errors encountered are seamlessly converted to KDB-compatible ones.</p>
+<p>Here’s the Rust code for the <code>.so</code> file (please feel free to critique!):</p>
+<pre class="rust"><code>use kdbplus::api::*;
+use kdbplus::qtype;
+use regex::Regex;
+
+#[no_mangle]
+pub extern &quot;C&quot; fn findstr(restr: K, heap: K) -&gt; K {
+    let mut results = new_list(qtype::COMPOUND_LIST, 0);
+    let re = Regex::new(restr.get_str().unwrap()).unwrap();
+    for x in re.find_iter(heap.get_str().unwrap()).map(|c| c.as_str()) {
+        results.push(new_string(x)).unwrap();
+    }
+    results
+}</code></pre>
+<p>Now lets load it in and check it works:</p>
+<pre><code>q)findstr:`:kdbregex 2:(`findstr;2)
+q)/ regex pattern to find all numbers:
+q)findstr[&quot;[0-9]+&quot;;&quot;123 456 te23s101&quot;]
+&quot;123&quot;
+&quot;456&quot;
+&quot;23&quot;
+&quot;101&quot;</code></pre>
+<h2 id="using-our-new-library">Using Our New Library</h2>
+<p>So before we got sidetracked we where solving an Advent of code problem. We want to find all instances of <code>mul(</code> followed by a number then <code>,</code> another number and then <code>)</code>. The regex for this is <code>mul\([0-9]+,[0-9]+\)</code> and so we can use our new function like so (taking care to escape our <code>\</code>):</p>
+<pre><code>q)inp:findstr[&quot;mul\\([0-9]+,[0-9]+\\)&quot;;]raze read0`:data/3
+&quot;mul(2,4)&quot;
+&quot;mul(5,5)&quot;
+&quot;mul(11,8)&quot;
+&quot;mul(8,5)&quot;</code></pre>
+<p>We can extract the numbers easily by using another regex (who knew our little library could do so much!) along with a reshape:</p>
+<pre><code>q)&quot;J&quot;$findstr[&quot;[0-9]+&quot;]raze inp
+2 4 5 5 11 8 8 5
+q)0N 2#&quot;J&quot;$findstr[&quot;[0-9]+&quot;]raze inp
+2  4
+5  5
+11 8
+q)sum(*/)flip 0N 2#&quot;J&quot;$findstr[&quot;[0-9]+&quot;]raze inp
+161</code></pre>
+<h1 id="part-2">Part 2</h1>
+<p>For part 2 we need to filter down our input to only those which are not between a <code>don't()</code> and <code>do()</code>. To do this, first we will expand our regex to match <code>don't()</code> and <code>do()</code> like so:</p>
+<pre><code>q)unfiltered:findstr[&quot;mul\\([0-9]+,[0-9]+\\)|do\\(\\)|don&#39;t\\(\\)&quot;;]raze read0`:data/3
+q)unfiltered
+&quot;mul(2,4)&quot;
+&quot;don&#39;t()&quot;
+&quot;mul(5,5)&quot;
+&quot;mul(11,8)&quot;
+&quot;do()&quot;</code></pre>
+<p>Next, we need to filter our list of matches by determining whether the preceding <code>do()</code> or <code>don't()</code> indicates that we are currently within a <code>do()</code> block. The easiest way to achieve this is by creating a function that processes the state and input iteratively and outputs the filtered list.</p>
+<p>The function will accept the next match to process and the current state as a tuple containing:</p>
+<ul>
+<li>The list of filtered matches so far.</li>
+<li>A boolean flag indicating whether we are currently in a <code>do()</code> block.</li>
+</ul>
+<p>The logic for handling each case is as follows:</p>
+<ul>
+<li>If we are inside a <code>do()</code> block and the input is not <code>do()</code> or <code>don't()</code>, add the input to the filtered list.</li>
+<li>If we are outside a <code>do()</code> block and the input is not <code>do()</code>, skip the input.</li>
+<li>If the input is <code>do()</code> and we are outside a <code>do()</code> block, switch the boolean flag to <code>true</code>.</li>
+<li>If the input is <code>don't()</code> and we are inside a <code>do()</code> block, switch the boolean flag to <code>false</code>.</li>
+</ul>
+<p>Here’s the function that implements this logic:</p>
+<pre><code>filterfunc:{
+    if[y~&quot;do()&quot;;:@[x;1;:;1b]]; / switch to do
+    if[y~&quot;don&#39;t()&quot;;:@[x;1;:;0b]]; / switch to dont
+    $[x 1;@[x;0;,;enlist y];x] / add input if in do
+    }
+
+q)(();1b)filterfunc/unfiltered
+(&quot;mul(2,4)&quot;;&quot;mul(8,5)&quot;)
+1b</code></pre>
+<p>We can then just take the filtered list and use as normal:</p>
+<pre><code>q)sum(*/)flip 0N 2#&quot;J&quot;$findstr[&quot;[0-9]+&quot;]raze first (();1b)filterfunc/unfiltered
+48</code></pre>
+<p>In case you are curious this ran 1 thousand times over the actual input in under 1 second when the <code>.so</code> is compiled with optimizations on. I don’t think you could beat that with pure KDB but I would love to be proven wrong! If you have any interesting solutions feel free to let me know.</p>
+<!----CONTENT_BEGIN---->
+</div>
+<div style="margin-top: 3em;"></div>
+<body>
