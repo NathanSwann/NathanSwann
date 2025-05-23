@@ -1,0 +1,235 @@
+
+<head>
+<!---- FONTS ---->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@700&family=Permanent+Marker&family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+<link href="/NathanSwann/static/blog.css" rel="stylesheet">
+
+<meta http-equiv="Content-Type" content="text/html;charset=UTF-8">
+</head>
+
+<body>
+<h1 style="text-align:center;width:100%;font-size:2em;margin-top:1em">Just In Time Compilation</h1>
+<div id="content" style="width:70%;margin:auto;text-align:justify">
+<p>In a recent post, I mentioned my interest in understanding how Just-In-Time (JIT) compilation works, with the goal of eventually building my own compiler for a toy programming language. This time, the language is one I’ve designed from scratch. It may not be feature-rich yet, but before diving into its specifics, let’s first explore the concept of JIT compilation.</p>
+<h1 id="what-is-jit-compilation">What Is JIT Compilation?</h1>
+<p>Just-In-Time (JIT) compilation is a term that often gets explained in overly complex ways, so let’s break it down. Historically, if you weren’t programming directly in assembly or using punch cards, you’d be working with a higher-level language like FORTRAN. To execute your code, you’d run it through a separate application called a compiler, which translates your high-level code into machine instructions that your CPU understands. Some compilers even optimize the code during this translation, removing inefficiencies like dead code. However, a major downside of this traditional compilation process is that it’s not interactive—you can’t quickly test new ideas without recompiling the entire source code.</p>
+<p>In the 1960s, John McCarthy, the creator of LISP, introduced a new idea: Instead of compiling source code all at once, why not compile it <em>just in time</em>—as the program runs? This approach allows the compiler to generate machine code on the fly based on the context provided by user input or the program’s current state. For example, if you define a function like <code>(define double (x) (* 2 x))</code>, you don’t have to specify whether x is an integer or a float. A traditional compiler might need to generate different versions for each type, but a JIT compiler can create only the versions needed, exactly when they’re needed. Over time, this idea evolved and laid the foundation for modern JIT compilers.</p>
+<h2 id="jit-vs.-interpreters">JIT vs. Interpreters</h2>
+<p>At this point, you might be wondering, “Isn’t this similar to what an interpreter does?” While both JIT compilers and interpreters handle code dynamically, the key difference lies in execution. A JIT compiler generates machine code that can be executed directly by the CPU, while an interpreter (like Python) translates and runs bytecode at runtime, without converting it to machine code.</p>
+<p>Interestingly, the Java Virtual Machine (JVM) combines both approaches. Initially, the JVM interprets bytecode, but as it identifies frequently executed code, it switches to JIT compilation for those sections. This hybrid approach allows the JVM to balance the immediate responsiveness of interpretation with the performance gains of compilation, making Java more efficient than a purely interpreted language.</p>
+<h1 id="how-do-we-actually-jit-compile">How Do We Actually JIT Compile?</h1>
+<p>Now that we’ve covered the basics of Just-In-Time (JIT) compilation, let’s dive into the actual process of making it work. At its core, JIT compilation involves turning source code into raw machine code, which is then executed in memory. For now, we’ll skip over the compilation step itself and focus on the key challenge: executing arbitrary machine code in memory. While this can be done in various programming languages, we’ll use C on Linux for simplicity.</p>
+<p>Our first task is to allocate a block of memory that Linux will allow us to execute. This is accomplished via a system call called <code>mmap</code>. Let’s break it down.</p>
+<h2 id="memory-mapping-with-mmap">Memory Mapping with <code>mmap</code></h2>
+<p>At its most basic level, <code>mmap</code> is a Linux system call used to allocate a region of memory for the current process. This region can be set up with specific permissions, such as being executable, which is crucial for running dynamically generated machine code.</p>
+<p>Here are the key arguments that <code>mmap</code> takes:</p>
+<ul>
+<li><strong>Address Pointer</strong>: This tells <code>mmap</code> where to create the memory space. We usually pass <code>NULL</code> here, allowing the kernel to choose the most suitable address.</li>
+<li><strong>Size</strong>: This defines the size of the memory block in bytes.</li>
+<li><strong>Protection Flags</strong>: These control what operations are allowed on the memory region. For JIT compilation, we need the memory to be <strong>readable</strong>, <strong>writable</strong>, and <strong>executable</strong>.</li>
+<li><strong>Additional Flags</strong>: These specify options like whether the memory is shared between processes or backed by a file. In our case, we want the memory to be private to our process (<code>MAP_PRIVATE</code>) and initialized as zeroed-out memory (<code>MAP_ANONYMOUS</code>).</li>
+<li><strong>File Descriptor</strong>: If the memory block is to be mapped to a file, you’d provide a file descriptor here. Since we’re not using a file, we set this to <code>-1</code>.</li>
+<li><strong>Offset</strong>: If using a file descriptor, this specifies the offset within the file. Since we have no file, we set this to <code>0</code>.</li>
+</ul>
+<p>With these parameters in mind, here’s a basic implementation in C to allocate executable memory:</p>
+<pre class="c"><code>#include &lt;sys/mman.h&gt;  // mmap
+int main() {
+    // Set protection flags to allow execution, reading, and writing
+    int protection_flags = PROT_EXEC | PROT_READ | PROT_WRITE;
+    // Set mapping flags to mark the memory as private and not backed by a file
+    int mapping_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    // Allocate memory for the executable code
+    char* exec_block = mmap(NULL, comp_size, protection_flags, mapping_flags, -1, 0);
+}</code></pre>
+<h2 id="a-crash-course-on-c-calling-conventions">A Crash Course on C Calling Conventions</h2>
+<p>Now that we have allocated executable memory, let’s start by creating the simplest piece of code we can inject into that memory. A basic example would be a function like this:</p>
+<pre class="c"><code>int func(int var1, int var2) {
+    return var2 * (var1 + 40);
+}</code></pre>
+<p>In C, on x86_64 architecture, function arguments are typically passed through CPU registers. The first three arguments are passed in the <code>rdi</code>, <code>rsi</code>, and <code>rdx</code> registers, and the return value is stored in the <code>rax</code> register. So, in this function, we need to:</p>
+<ol type="1">
+<li>Add <code>40</code> to the value in <code>rdi</code> (representing <code>var1</code>).</li>
+<li>Multiply the result by the value in <code>rsi</code> (representing <code>var2</code>).</li>
+<li>Store the result in <code>rax</code> and return it.</li>
+</ol>
+<p>Here’s how we can implement this logic in NASM (Netwide Assembler) assembly language:</p>
+<pre class="asm"><code>BITS 64          ; Set 64-bit mode
+add rdi, 40      ; Add 40 to the first argument
+mov rax, rdi     ; Move the result to rax (return value)
+mul rsi          ; Multiply rax by the second argument (stored in rsi)
+ret              ; Return, with the result in rax</code></pre>
+<p>When this code is assembled with NASM and viewed as machine code, we get the following bytes (output generated using <code>xxd -i a</code>):</p>
+<pre class="c"><code>unsigned char a[] = {
+  0x48, 0x83, 0xc7, 0x28, 0x48, 0x89, 0xf8, 0x48, 0xf7, 0xe6, 0xc3
+};
+unsigned int a_len = 11;</code></pre>
+<p>These machine code bytes represent the compiled assembly instructions, which we can now copy into our executable memory block. After copying the machine code, we can cast the memory block pointer to a function pointer in C and invoke it like a normal function:</p>
+<pre class="c"><code>int (*func)(int, int) = exec_block;
+printf(&quot;%d\n&quot;, func(10, 20));</code></pre>
+<p>In this case, <code>func(10, 20)</code> will execute the machine code we just injected, adding <code>40</code> to <code>10</code>, multiplying the result by <code>20</code>, and printing the final value.</p>
+<p>With that, we’ve successfully created and executed our own function directly in machine code! The next step will be to design a language that can be compiled into this kind of executable code.</p>
+<h1 id="introducing-calc">Introducing Calc</h1>
+<p>This time, I’m aiming for a language that’s a bit more accessible to both you and me. That language is <strong>Calc</strong>—the over-engineered calculator. Calc uses <a href="https://en.wikipedia.org/wiki/Polish_notation">Polish notation</a>, meaning operations are written before their operands, e.g., <code>+ 1 2</code> instead of <code>1 + 2</code>. It supports basic operations on integers like addition, division, square roots, and even a simple form of conditional logic with if statements.</p>
+<p>At its core, Calc is built around three main types of syntax elements:</p>
+<ol type="1">
+<li><strong>Numbers</strong>: These are straightforward integers, such as <code>34</code> or <code>654</code>.</li>
+<li><strong>Graphemes</strong>: Single-letter operations like <code>+</code> or <code>x</code> (where <code>x</code> represents the variable <code>x</code>).</li>
+<li><strong>Digraphs</strong>: Two-letter combinations that represent more complex operations. In Calc, digraphs always end in <code>:</code> or <code>/</code>. For example:
+<ul>
+<li><code>+:</code> stands for square root.</li>
+<li><code>+/</code> sums all remaining numbers on the stack.</li>
+</ul></li>
+</ol>
+<h3 id="the-stack-based-execution-model">The Stack-Based Execution Model</h3>
+<p>Calc is <a href="https://en.wikipedia.org/wiki/Stack_machine">stack-based</a> and operates right to left. This means that every operation either adds or removes numbers from the stack, and at the end of execution, there will be exactly one number left on the stack—that’s your result.</p>
+<p>Here’s how a simple Calc expression works in practice. Consider the expression <code>*+ 1 2 3</code>:</p>
+<ol type="1">
+<li>Add <code>3</code> to the stack.</li>
+<li>Add <code>2</code> to the stack.</li>
+<li>Add <code>1</code> to the stack.</li>
+<li>Pop the top two numbers (<code>1</code> and <code>2</code>), sum them, and push the result (<code>3</code>) back onto the stack.</li>
+<li>Pop the top two numbers (<code>3</code> and <code>3</code>), multiply them, and push the result (<code>9</code>) back onto the stack.</li>
+<li>Return the final result: <code>9</code>.</li>
+</ol>
+<h3 id="complete-symbol-list">Complete Symbol List</h3>
+<p>Here is a full list of symbols used in Calc:</p>
+<pre><code>def:\d[fc]code  (vars: x y z)
+call:\c[fc] x y z
+CHAR  PRIMARY  SECONDARY (:)    ADVERBS
++      add      sqrt               /    - continue until 1 element
+-      sub      neg
+%      div      mod
+*      mul      
+~      swap     dup
+$      if       </code></pre>
+<h3 id="function-definitions-in-calc">Function Definitions in Calc</h3>
+<p>Calc also supports basic function definitions and calls. The syntax for this is as follows:</p>
+<ul>
+<li><strong>Define a function</strong>: <code>\df</code></li>
+<li><strong>Call a function</strong>: <code>\cf</code></li>
+</ul>
+<p>For example, <code>\df *xx</code> defines a function <code>f</code> that doubles its input. You can then call this function with <code>\cf 10</code>, which would return <code>20</code>. Calc functions are limited to using up to three variables (<code>x</code>, <code>y</code>, <code>z</code>), and functions cannot be nested or called within other functions or input.</p>
+<h1 id="doing-some-compilation">Doing some compilation</h1>
+<p>With that out of the way lets see what it takes to make the compiler. For testing I am going to use my favourite function again the collatz mapping! In Calc its rather easily defined by <code>\df$%:x2+1*3x%x2</code> if you are thinking “Wow thats terse” I say “yes isn’t it marvelous!”. To compile this function we need to be able to:</p>
+<ol type="1">
+<li>Add numbers (and variables) to the stack,</li>
+<li>Divide, multiply, add and take the modulo of two numbers</li>
+<li>Do some form of if statements.</li>
+</ol>
+<h2 id="manipulating-the-stack">Manipulating the stack</h2>
+<p>The first order of business is the ability to push values to the stack but even before then we have to ask “what stack?”. This is where modern cpus arrive to save the day! Your cpu already has a stack built in. The stack is merely a data segment inside the processes virtual address space that can be increased or decreased via the <code>push</code> or <code>pop</code> instructions making it ideal for temporary small variable storage. In general the memory layout for a process is something like so:</p>
+<p><img src="/static/images/Memory_Layout.png" style="width:90%;margin:auto;display:block;mix-blend-mode: multiply;"></p>
+<p>So we have two main ways of pushing data to the stack, the first is to push an immediate value e.g. <code>push 123</code> and the second is to push the value stored inside a register such as <code>push rax</code>. Lets look at the register version first, these are actually just a single op code e.g. <code>0x57</code> to push <code>rdi</code> so they are very easy to handle. On the other hand pushing actual numbers takes a bit more work. First we need to add <code>0x68</code> to denote that we are pushing a 64 bit value followed by the raw bytes of the integer in <a href="https://en.wikipedia.org/wiki/Endianness">Big-Endian</a> like so:</p>
+<pre><code>// insert the machine code to push a static value
+void insert_pushstatic(char* mem, __int64_t num) {
+     char *opnum = &amp;num; // convert the number to a 4 byte array
+     mem[0] = 0x68;      // opcode to push 64 bit numbers
+     mem[1] = opnum[0];
+     mem[2] = opnum[1];
+     mem[3] = opnum[2];
+     mem[4] = opnum[3];
+}</code></pre>
+<p>From this its easy to implement variables, swapping elements on the stack and duplicating elements on the stack.</p>
+<h2 id="basic-math">Basic Math</h2>
+<p>For normal math operations its easier to just write these in NASM and have it figure out the machine code. For example for addition:</p>
+<pre class="nasm"><code>pop rax
+pop rbx
+add rax,rbx
+push rax</code></pre>
+<p>From there its fairly easy to compile this and save in a static list somewhere in code:</p>
+<pre><code>unsigned char asm_add[] = {
+  0x58, 0x5b, 0x48, 0x01, 0xd8, 0x50
+};
+unsigned int asm_add_len = 6;</code></pre>
+<p>And then simply copy this machine code any time it is needed like so:</p>
+<pre><code>strcopy(mem, asm_add, asm_add_len);</code></pre>
+<h2 id="if-statements">If Statements</h2>
+<p>So the correct way to do this would be to actually generate jump statements in code to handle if blocks, due to the nature of Calc however its actually safe to just <code>pop</code> to the two options of the stack and then decide on which one to <code>push</code> back. Meaning there is no need to track if statements.</p>
+<pre><code>pop rax
+pop rbx
+pop rcx
+cmp rax, 0
+jg __ok
+    push rcx
+    jmp __end
+__ok:
+    push rbx
+__end:</code></pre>
+<p>This does have limitations however, this is why Calc does not support recursion as there would be no way to break out since all branches are executed not just the true path. Similar for while and for loops.</p>
+<p>With that its done! The full implementation is availble on <a href="https://github.com/NathanSwann/calcjit">the github repo</a> however before I call this done I want to have a look at calling C.</p>
+<h2 id="calling-c-from-calc">Calling C from Calc</h2>
+<p>Theres no better function than <code>sqrt</code> to do this with. Integer square root is compilcated enough that writing it in assembly by hand is a bit of a pain so lets look at a common C implementation(in this case taken from Hackers Delight by Henry Warren):</p>
+<pre><code>long isqrt(long x)
+{
+    unsigned long x1, x2;
+    if (x &lt; 0)
+        return -1;
+    unsigned m,y,b;
+    x1 = x;
+    m = 0x40000000;
+    y = 0;
+    while (m != 0) {
+        b = y | m;
+        y = y&gt;&gt;1;
+        if (x&gt;=b) {
+            x = x-b;
+            y = y | m;
+        }
+        m = m &gt;&gt; 2;
+    }
+    return y;
+}</code></pre>
+<p>Then when generating the machine code we can instead make a function call to this C function that will already be in memory. This is the longest single block of machine code however its not that bad. One thing to notice is because it uses <code>r11</code> there is a number of machine code instructions used to extend the instructions to allow for the 64 bit only register.</p>
+<pre><code>void call_monadic_by_ptr(char* mem,void* fpointer) {
+     __uint64_t p = (__uint64_t)fpointer;
+     mem[0] = 0x5f; // pop rdi (var 1)
+     mem[1] = 0x41; // extended 64 bit instruction
+     mem[2] = 0x53; // push r11 (saving register for use)
+     mem[3] = 0x49; // move immediate 64 bit value into r11
+     mem[4] = 0xbb; // ..
+
+     // insert the function pointer into the move statement
+     mem[5] = p &amp; 0xff;
+     mem[6] = (p &gt;&gt; 8) &amp; 0xff;
+     mem[7] = (p &gt;&gt; 16) &amp; 0xff;
+     mem[8] = (p &gt;&gt; 24) &amp; 0xff;
+     mem[9] = (p &gt;&gt; 32) &amp; 0xff;
+     mem[10] = (p &gt;&gt; 40) &amp; 0xff;
+     mem[11] = (p &gt;&gt; 48) &amp; 0xff;
+     mem[12] = (p &gt;&gt; 56) &amp; 0xff;
+
+     mem[13] = 0x41; // extended 64 bit instruction
+     mem[14] = 0xff; // call ..
+     mem[15] = 0xd3; // r11
+     mem[16] = 0x41; // extended 64 bit instruction
+     mem[17] = 0x5b; // pop r11 (restoring to the orginal state)
+     mem[18] = 0x50; // push rax
+}</code></pre>
+<h1 id="performance">Performance</h1>
+<p>Once again lets compare our new compiler to python. Due to the fact that calc doesnt have while loops etc this time Im looking at just the collatz mapping function rather than the length of the chain. For this test the program must take in integers from <code>stdin</code> and return their value after being mapped. The test was ran for all numbers up to 1,000,000. As previously mentioned the calc function is <code>\df$%:x2+1*3x%x2</code> and each input was prepended with <code>\cf</code>. For completeness the python code was:</p>
+<pre><code>def collatz(x):
+    if x % 2:
+        return (3*x)+1
+    return x // 2
+while True:
+   i = int(input())
+   print(collatz(i))</code></pre>
+<pre><code>$ time python bench.py &lt; testinput &gt; /dev/null
+
+real    0m1.135s
+user    0m0.946s
+sys 0m0.185s
+$ time ./calc &lt; testinput &gt; /dev/null
+
+real    0m0.790s
+user    0m0.781s
+sys 0m0.008s</code></pre>
+<p>I would consider that a success!</p>
+<h1 id="final-thoughts">Final Thoughts</h1>
+<p>When I started this I had no idea how JIT compilation actually works and I would say now I have a pretty good grasp on the basics. Calc is by no means practical but I think this excercise has given me a few tools to use later. The natural next step with this would be to try and make something more practical to use and for that I do have a few ideas but for now I am pretty happy with how this turned out.</p>
+<!----CONTENT_BEGIN---->
+</div>
+<div style="margin-top: 3em;"></div>
+<body>
