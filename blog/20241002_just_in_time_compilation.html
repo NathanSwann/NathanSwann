@@ -110,7 +110,7 @@ $      if       </code></pre>
 <li><strong>Define a function</strong>: <code>\df</code></li>
 <li><strong>Call a function</strong>: <code>\cf</code></li>
 </ul>
-<p>For example, <code>\df *xx</code> defines a function <code>f</code> that doubles its input. You can then call this function with <code>\cf 10</code>, which would return <code>20</code>. Calc functions are limited to using up to three variables (<code>x</code>, <code>y</code>, <code>z</code>), and functions cannot be nested or called within other functions or input.</p>
+<p>For example, <code>\df +xx</code> defines a function <code>f</code> that doubles its input. You can then call this function with <code>\cf 10</code>, which would return <code>20</code>. Calc functions are limited to using up to three variables (<code>x</code>, <code>y</code>, <code>z</code>), and functions cannot be nested or called within other functions or input.</p>
 <h1 id="doing-some-compilation">Doing some compilation</h1>
 <p>With that out of the way lets see what it takes to make the compiler. For testing I am going to use my favourite function again the collatz mapping! In Calc its rather easily defined by <code>\df$%:x2+1*3x%x2</code> if you are thinking “Wow thats terse” I say “yes isn’t it marvelous!”. To compile this function we need to be able to:</p>
 <ol type="1">
