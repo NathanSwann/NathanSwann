@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <link href="/static/blog.css" rel="stylesheet">
+    <link href="/NathanSwann/static/blog.css" rel="stylesheet">
     <script>
     (function() {
         var saved = localStorage.getItem('theme');
@@ -23,9 +23,9 @@
 <nav id="toc"></nav>
 <h1 class="post-title">Just In Time Compilation</h1>
 <nav class="post-nav">
-<span class="post-nav-prev"><a href="/blog/20240819_compiling_brainfuck.md_render.html">← Compiling Brainfuck</a></span>
-<span class="post-nav-index"><a href="/blog/index.html">Index</a></span>
-<span class="post-nav-next"><a href="/blog/20241201_AOC_day_1.md_render.html">AOC Day 1 →</a></span>
+<span class="post-nav-prev"><a href="/NathanSwann/blog/20240819_compiling_brainfuck.md_render.html">← Compiling Brainfuck</a></span>
+<span class="post-nav-index"><a href="/NathanSwann/blog/index.html">Index</a></span>
+<span class="post-nav-next"><a href="/NathanSwann/blog/20241201_AOC_day_1.md_render.html">AOC Day 1 →</a></span>
 </nav>
 <div id="content">
 <p>In a recent post, I mentioned my interest in understanding how Just-In-Time (JIT) compilation works, with the goal of eventually building my own compiler for a toy programming language. This time, the language is one I’ve designed from scratch. It may not be feature-rich yet, but before diving into its specifics, let’s first explore the concept of JIT compilation.</p>
@@ -136,7 +136,7 @@ $      if       </code></pre>
 </ol>
 <h2 id="manipulating-the-stack">Manipulating the stack</h2>
 <p>The first order of business is the ability to push values to the stack but even before then we have to ask “what stack?”. This is where modern cpus arrive to save the day! Your cpu already has a stack built in. The stack is merely a data segment inside the processes virtual address space that can be increased or decreased via the <code>push</code> or <code>pop</code> instructions making it ideal for temporary small variable storage. In general the memory layout for a process is something like so:</p>
-<p><img src="/static/images/Memory_Layout.png" style="width:90%;margin:auto;display:block;mix-blend-mode: multiply;"></p>
+<p><img src="../static/images/Memory_Layout.png" style="width:90%;margin:auto;display:block;mix-blend-mode: multiply;"></p>
 <p>So we have two main ways of pushing data to the stack, the first is to push an immediate value e.g. <code>push 123</code> and the second is to push the value stored inside a register such as <code>push rax</code>. Lets look at the register version first, these are actually just a single op code e.g. <code>0x57</code> to push <code>rdi</code> so they are very easy to handle. On the other hand pushing actual numbers takes a bit more work. First we need to add <code>0x68</code> to denote that we are pushing a 64 bit value followed by the raw bytes of the integer in <a href="https://en.wikipedia.org/wiki/Endianness">Big-Endian</a> like so:</p>
 <pre><code>// insert the machine code to push a static value
 void insert_pushstatic(char* mem, __int64_t num) {
@@ -248,9 +248,9 @@ sys 0m0.008s</code></pre>
 <!----CONTENT_BEGIN---->
 </div>
 <nav class="post-nav">
-<span class="post-nav-prev"><a href="/blog/20240819_compiling_brainfuck.md_render.html">← Compiling Brainfuck</a></span>
-<span class="post-nav-index"><a href="/blog/index.html">Index</a></span>
-<span class="post-nav-next"><a href="/blog/20241201_AOC_day_1.md_render.html">AOC Day 1 →</a></span>
+<span class="post-nav-prev"><a href="/NathanSwann/blog/20240819_compiling_brainfuck.md_render.html">← Compiling Brainfuck</a></span>
+<span class="post-nav-index"><a href="/NathanSwann/blog/index.html">Index</a></span>
+<span class="post-nav-next"><a href="/NathanSwann/blog/20241201_AOC_day_1.md_render.html">AOC Day 1 →</a></span>
 </nav>
 <script>
 document.getElementById('theme-toggle').addEventListener('click', function() {
