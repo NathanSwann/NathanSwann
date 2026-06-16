@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How This Site Is Generated</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <link href="/static/blog.css" rel="stylesheet">
+    <script>
+    (function() {
+        var saved = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (saved === 'dark' || (!saved && prefersDark)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
+</head>
+<body>
+<button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode"></button>
+<nav id="toc"></nav>
+<h1 class="post-title">How This Site Is Generated</h1>
+<nav class="post-nav">
+<span class="post-nav-prev"><a href="/blog/20241203_AOC_day_3.md_render.html">← AOC Day 3</a></span>
+<span class="post-nav-index"><a href="/blog/index.html">Index</a></span>
+<span class="post-nav-next"></span>
+</nav>
+<div id="content">
+<p>It’s no secret that I despise just about anything to do with browsers: HTML, CSS, JS, 100s of random dependencies and random browser quirks. In a world where a lot of things are React mono-apps, the thought of making this blog put me into a spiral of finding the right solution. Ultimately the entire job of this blog is to display text in a readable, friendly manner. For that, things should be simple.</p>
+<p>Given I don’t want to just be writing raw HTML, the most common path (to my knowledge) is static site generators like Jekyll or Hugo, but they bring with them a lot of baggage. I want to rebuild my entire site in less than a second, I don’t overly care about fancy features, I just want something that works the way I want it and no more.</p>
+<h1 id="something-done-right">Something Done Right</h1>
+<p>With all that said, I decided that if I wanted a static generator that works my way I would have to make it. So let’s go over the requirements of this blog:</p>
+<ol type="1">
+<li><strong>Super minimal dependencies</strong> - The generator should never break when I update something or switch computers, it should depend on the barest of minimal requirements.</li>
+<li><strong>Render Markdown</strong> - I want to be able to write Markdown rather than HTML.</li>
+<li><strong>Navigation</strong> - You should be able to click between posts, a simple TOC and index should be enough.</li>
+<li><strong>Simple Styling</strong> - Nothing flashy, I’m not trying to develop the next dopamine-addicting app, just a blog.</li>
+</ol>
+<h2 id="the-one-dependency">The One Dependency</h2>
+<p>The hardest part of this is rendering Markdown, thankfully a tool exists that can turn a Markdown page into HTML: <a href="https://pandoc.org/">pandoc</a>. I actually use this everywhere in my day to day and it’s a super stable and well supported program so no issues with dependency hell. I could stop here with a</p>
+<pre><code>pandoc --no-highlight blog.md</code></pre>
+<p>but like I said I want a bit more.</p>
+<h1 id="the-actual-build-script">The Actual Build Script</h1>
+<p>Since I’m using <code>pandoc</code>, a simple bash script that builds my site via <code>pandoc</code> is basically all I need. The entire generation for this site is around 60 lines of bash and a couple of HTML templates with CSS styling. So how does it work? Well let’s break it down into its actual steps:</p>
+<ol type="1">
+<li>Collect blog post files</li>
+<li>Render each blog</li>
+<li>Render the index</li>
+</ol>
+<p>Step 1 is literally just a <code>find blog -name "*.md"</code> command put into an array.</p>
+<h2 id="rendering-a-singular-blog">Rendering A Singular Blog</h2>
+<p>For simplicity each blog is rendered into the same template, the shortened layout of which is this:</p>
+<details>
+<p><summary>Template layout</summary></p>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+    &lt;title&gt;{{title}}&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;h1 class=&quot;post-title&quot;&gt;{{title}}&lt;/h1&gt;
+&lt;nav class=&quot;post-nav&quot;&gt;
+&lt;span class=&quot;post-nav-prev&quot;&gt;{{prev_nav}}&lt;/span&gt;
+&lt;span class=&quot;post-nav-index&quot;&gt;&lt;a href=&quot;/blog/index.html&quot;&gt;Index&lt;/a&gt;&lt;/span&gt;
+&lt;span class=&quot;post-nav-next&quot;&gt;{{next_nav}}&lt;/span&gt;
+&lt;/nav&gt;
+&lt;div id=&quot;content&quot;&gt;
+&lt;!----CONTENT_BEGIN----&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+</details>
+<p>The names are fairly self-explanatory. All the script needs to do is take a Markdown file and figure out what its title is, the posts before and after it, and the actual content. I store the title in the actual filename (this post’s filename is <code>20260616_how_this_site_is_generated</code>) and run <code>sed</code> to get a nicely formatted title by removing the date and fixing the casing. Similarly, since we collect everything beforehand, the prev and next navs can just take the previous and next post from the array. Now for the content, you might think that this is some insane code… it’s not.</p>
+<p>This one is actually kind of interesting though, for no other reason than it lets me show off some nice <code>sed</code> tricks. You could pipe the output of <code>pandoc</code> into a file and then splice that file in using <code>sed</code>, or we can tell <code>sed</code> to use <code>pandoc</code>! To do this I’m using the <code>e</code> mode of <code>sed</code> rather than the usual <code>g</code> or <code>d</code>. <code>e</code> tells <code>sed</code> to insert the output of the following command before the matched line, for example:</p>
+<pre><code>echo -e &quot;test\ntest2&quot; | sed &#39;/test2/e whoami&#39;
+test
+nathan
+test2</code></pre>
+<p>So in order to render we can do:</p>
+<pre><code>sed /&lt;!----CONTENT_BEGIN----&gt;/e pandoc path_to_markdown</code></pre>
+<p>The full blog generation is this, in case you are curious:</p>
+<details>
+<p><summary>Full generation code</summary></p>
+<pre class="bash"><code>title_from_path() {
+    basename &quot;$1&quot; | sed -e &quot;s/[^_]*_\(.*\)\.md/\1/&quot; | sed &quot;s/_/ /g&quot; | sed -e &quot;s/\b\(.\)/\u\1/g&quot;
+}
+
+mapfile -t ALL_POSTS &lt; &lt;(find blog -name &quot;*.md&quot; | sort)
+N=${#ALL_POSTS[@]}
+
+generate_blog() {
+    local idx=$1
+    local p=${ALL_POSTS[$idx]}
+    local blog_name
+    blog_name=$(title_from_path &quot;$p&quot;)
+
+    local prev_nav=&quot;&quot;
+    local next_nav=&quot;&quot;
+
+    if [ &quot;$idx&quot; -gt 0 ]; then
+        local prev_p=${ALL_POSTS[$((idx-1))]}
+        local prev_title prev_url
+        prev_title=$(title_from_path &quot;$prev_p&quot;)
+        prev_url=&quot;/blog/$(basename &quot;$prev_p&quot;)_render.html&quot;
+        prev_nav=&quot;&lt;a href=\&quot;${prev_url}\&quot;&gt;← ${prev_title}&lt;/a&gt;&quot;
+    fi
+
+    if [ &quot;$((idx+1))&quot; -lt &quot;$N&quot; ]; then
+        local next_p=${ALL_POSTS[$((idx+1))]}
+        local next_title next_url
+        next_title=$(title_from_path &quot;$next_p&quot;)
+        next_url=&quot;/blog/$(basename &quot;$next_p&quot;)_render.html&quot;
+        next_nav=&quot;&lt;a href=\&quot;${next_url}\&quot;&gt;${next_title} →&lt;/a&gt;&quot;
+    fi
+
+    sed &quot;s|{{title}}|${blog_name}|g&quot; templates/blog.html \
+        | sed &quot;s|{{prev_nav}}|${prev_nav}|g&quot; \
+        | sed &quot;s|{{next_nav}}|${next_nav}|g&quot; \
+        | sed &quot;/&lt;!----CONTENT_BEGIN----&gt;/ e pandoc --no-highlight ${p}&quot; \
+        &gt; &quot;${p}_render.html&quot;
+
+    echo &quot;Built: $p&quot;
+}
+
+for i in &quot;${!ALL_POSTS[@]}&quot;; do
+    generate_blog &quot;$i&quot;
+done</code></pre>
+</details>
+<h2 id="the-index-and-toc">The Index and TOC</h2>
+<p>The index page works the same way. I split a template at a marker, emit a <code>&lt;ul&gt;</code> of posts in reverse chronological order, stitch it back together. The table of contents is the one thing that runs client-side: a small JS snippet queries <code>#content</code> for headings on page load and builds the list from whatever <code>pandoc</code> generated.</p>
+<details>
+<p><summary>Index Generation Code</summary></p>
+<pre class="bash"><code>generate_index() {
+    {
+        sed -n &#39;/&lt;!--INDEX_CONTENT--&gt;/{ q }; p&#39; templates/blog_index.html
+        echo &quot;&lt;ul class=\&quot;index-list\&quot;&gt;&quot;
+        for ((i=N-1; i&gt;=0; i--)); do
+            local p=${ALL_POSTS[$i]}
+            local title url date
+            title=$(title_from_path &quot;$p&quot;)
+            url=&quot;/blog/$(basename &quot;$p&quot;)_render.html&quot;
+            date=$(basename &quot;$p&quot; | grep -oE &#39;^[0-9]{8}&#39; | sed &#39;s/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3/&#39;)
+            echo &quot;&lt;li&gt;&lt;span class=\&quot;index-date\&quot;&gt;${date}&lt;/span&gt; &lt;a href=\&quot;${url}\&quot;&gt;${title}&lt;/a&gt;&lt;/li&gt;&quot;
+        done
+        echo &quot;&lt;/ul&gt;&quot;
+        sed -n &#39;/&lt;!--INDEX_CONTENT--&gt;/,$p&#39; templates/blog_index.html | tail -n +2
+    } &gt; blog/index.html
+    echo &quot;Built: blog/index.html&quot;
+}
+
+generate_index</code></pre>
+</details>
+<h1 id="what-i-didnt-do">What I Didn’t Do</h1>
+<p>Since this is tailored to my needs there are a lot of things I haven’t done. For example, hot reloading/auto-rebuilding, I just run my build script with <code>watch</code>, no need for something fancier. I don’t have any fancy plugin systems or anything since again this is a simple blog, it just needs to work for me.</p>
+<p>I guess my main takeaway here is that you don’t actually need a big fancy static generator or big React apps most of the time. Instead a bunch of bash utils can get you 90% of the way. This system is still performant (actually more so than some of the bigger generators) and covers all of my use cases. Not only that but it’s trivial to add new stuff to, since there isn’t some monolith that has made a bunch of assumptions for me. Overall I think this site is staying generated like this for a while.</p>
+<!----CONTENT_BEGIN---->
+</div>
+<nav class="post-nav">
+<span class="post-nav-prev"><a href="/blog/20241203_AOC_day_3.md_render.html">← AOC Day 3</a></span>
+<span class="post-nav-index"><a href="/blog/index.html">Index</a></span>
+<span class="post-nav-next"></span>
+</nav>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function() {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var next = isDark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+});
+
+(function() {
+    var headings = document.querySelectorAll('#content h1, #content h2, #content h3, #content h4');
+    if (headings.length < 2) return;
+    var toc = document.getElementById('toc');
+    var ul = document.createElement('ul');
+    headings.forEach(function(h, i) {
+        if (!h.id) h.id = 'toc-h' + i;
+        var li = document.createElement('li');
+        li.className = 'toc-' + h.tagName.toLowerCase();
+        var a = document.createElement('a');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent;
+        li.appendChild(a);
+        ul.appendChild(li);
+    });
+    toc.appendChild(ul);
+    toc.classList.add('toc-visible');
+})();
+</script>
+</body>
+</html>

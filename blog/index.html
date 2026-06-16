@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Index</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <link href="/static/blog.css" rel="stylesheet">
+    <script>
+    (function() {
+        var saved = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (saved === 'dark' || (!saved && prefersDark)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+    </script>
+</head>
+<body>
+<button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode"></button>
+<h1 class="post-title">Index</h1>
+<section class="about">
+    <p>I'm a KDB/Q developer working in high-touch execution. This blog is where I write about things that catch my
+    interest outside of my day job, from toy compilers to higher-level software and technical concepts. Find me on
+    <a href="https://github.com/NathanSwann">GitHub</a> or <a href="https://www.linkedin.com/in/nathan-swann-568765257/">LinkedIn</a>.
+    </p>
+</section>
+<hr class="about-divider">
+<div id="content">
+<ul class="index-list">
+<li><span class="index-date">2026-06-16</span> <a href="/blog/20260616_how_this_site_is_generated.md_render.html">How This Site Is Generated</a></li>
+<li><span class="index-date">2024-12-03</span> <a href="/blog/20241203_AOC_day_3.md_render.html">AOC Day 3</a></li>
+<li><span class="index-date">2024-12-02</span> <a href="/blog/20241202_AOC_day_2.md_render.html">AOC Day 2</a></li>
+<li><span class="index-date">2024-12-01</span> <a href="/blog/20241201_AOC_day_1.md_render.html">AOC Day 1</a></li>
+<li><span class="index-date">2024-10-02</span> <a href="/blog/20241002_just_in_time_compilation.md_render.html">Just In Time Compilation</a></li>
+<li><span class="index-date">2024-08-19</span> <a href="/blog/20240819_compiling_brainfuck.md_render.html">Compiling Brainfuck</a></li>
+</ul>
+</div>
+<script>
+document.getElementById('theme-toggle').addEventListener('click', function() {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var next = isDark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+});
+</script>
+</body>
+</html>
